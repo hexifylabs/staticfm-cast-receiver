@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>StaticFM Cast Receiver</title>
+  <!-- Cast CAF v3 SDK — must be first -->
+  <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #000000;
+      --surface:      #0d0d0d;
+      --surface-2:    #141414;
+      --surface-3:    #1a1a1a;
+      --border:       rgba(255,255,255,0.07);
+      --text:         #ffffff;
+      --text-muted:   #7a7a7a;
+      --text-faint:   #3a3a3a;
+      --red:          #e53535;
+      --red-dark:     #b01f1f;
+      --red-glow:     rgba(229, 53, 53, 0.45);
+      --red-glow-soft:rgba(229, 53, 53, 0.15);
+      --font:         'Inter', system-ui, sans-serif;
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      font-family: var(--font);
+      color: var(--text);
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Ambient red-tinted blurred background ── */
+    #ambient-bg {
+      position: fixed; inset: 0; z-index: 0;
+      background-size: cover;
+      background-position: center;
+      filter: blur(90px) brightness(0.18) saturate(0.6);
+      transform: scale(1.2);
+      opacity: 0;
+      transition: opacity 1.6s ease;
+    }
+    #ambient-bg.visible { opacity: 1; }
+
+    /* ── Subtle scan-line overlay for that TV/static feel ── */
+    .scanlines {
+      position: fixed; inset: 0; z-index: 1; pointer-events: none;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 3px,
+        rgba(0,0,0,0.08) 3px,
+        rgba(0,0,0,0.08) 4px
+      );
+    }
+
+    /* ── Main layout ── */
+    #app {
+      position: relative; z-index: 2;
+      width: 100%; height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 72px 100px;
+    }
+
+    .player-card {
+      display: flex;
+      align-items: center;
+      gap: 72px;
+      width: 100%;
+      max-width: 1440px;
+    }
+
+    /* ── Art Container — matches app's dark rounded card ── */
+    .art-wrap {
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .art-container {
+      width: 360px;
+      height: 360px;
+      border-radius: 32px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      overflow: hidden;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Red corner glow on art container */
+    .art-container::before {
+      content: '';
+      position: absolute; inset: 0;
+      border-radius: inherit;
+      background: radial-gradient(circle at 50% 50%, var(--red-glow-soft) 0%, transparent 70%);
+      opacity: 0;
+      transition: opacity 1s ease;
+      z-index: 1;
+    }
+    .art-container.has-art::before { opacity: 1; }
+
+    #album-art {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      display: none;
+      position: relative; z-index: 2;
+      transition: opacity 0.5s ease;
+    }
+    #album-art.visible { display: block; }
+
+    /* Fallback: the StaticFM glitchy logo */
+    .art-fallback {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      width: 100%;
+      height: 100%;
+      position: relative; z-index: 2;
+    }
+
+    /* Red glow shadow below art card */
+    .art-glow {
+      position: absolute;
+      bottom: -20px; left: 10%; right: 10%;
+      height: 60px;
+      border-radius: 50%;
+      background: var(--red);
+      filter: blur(28px);
+      opacity: 0;
+      transition: opacity 1.2s ease;
+      z-index: -1;
+    }
+    .art-container.has-art + .art-glow { opacity: 0.5; }
+
+    /* ── Track Info ── */
+    .info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* LIVE badge — red filled, matching app's red button style */
+    .live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 18px;
+      border-radius: 10px;
+      background: var(--red);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      width: fit-content;
+    }
+
+    .live-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #fff;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%,100%{opacity:1;transform:scale(1)}
+      50%{opacity:0.4;transform:scale(0.7)}
+    }
+
+    #station-name {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--red);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* "NOW PLAYING" label — uppercase bold like in the app */
+    .now-playing-label {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: -8px;
+    }
+
+    #track-title {
+      font-size: clamp(34px, 3.8vw, 58px);
+      font-weight: 800;
+      line-height: 1.08;
+      letter-spacing: -0.025em;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: opacity 0.3s ease;
+    }
+
+    #artist-name {
+      font-size: clamp(18px, 2.2vw, 30px);
+      font-weight: 500;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: opacity 0.3s ease;
+      margin-top: -4px;
+    }
+
+    /* Divider — thin, dark, matches app's card borders */
+    .divider {
+      height: 1px;
+      background: var(--border);
+      width: 100%;
+    }
+
+    /* ── EQ Bars ── */
+    .eq-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .eq-label {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+    }
+
+    .eq-wrap {
+      display: flex;
+      align-items: flex-end;
+      gap: 4px;
+      height: 28px;
+    }
+
+    .eq-bar {
+      width: 4px;
+      border-radius: 2px;
+      background: var(--red);
+      transform-origin: bottom;
+    }
+    .eq-bar:nth-child(1){animation:eq 0.85s ease-in-out 0s infinite}
+    .eq-bar:nth-child(2){animation:eq 0.65s ease-in-out 0.18s infinite}
+    .eq-bar:nth-child(3){animation:eq 1.0s ease-in-out 0.06s infinite}
+    .eq-bar:nth-child(4){animation:eq 0.75s ease-in-out 0.28s infinite}
+    .eq-bar:nth-child(5){animation:eq 0.95s ease-in-out 0.12s infinite}
+    .eq-bar:nth-child(6){animation:eq 0.7s ease-in-out 0.22s infinite}
+    .eq-bar:nth-child(7){animation:eq 0.88s ease-in-out 0.04s infinite}
+    @keyframes eq {
+      0%,100%{height:4px;opacity:0.3}
+      50%{height:26px;opacity:1}
+    }
+    .eq-wrap.paused .eq-bar{animation-play-state:paused}
+
+    /* ── Top header bar — "StaticFM" in red like the app ── */
+    .header {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 36px 72px 0;
+    }
+
+    .header-logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .header-wordmark {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+      color: var(--red);
+      text-transform: uppercase;
+    }
+
+    /* ── Idle Screen ── */
+    #idle-screen {
+      position: fixed; inset: 0; z-index: 10;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      transition: opacity 0.8s ease;
+    }
+    #idle-screen.hidden { opacity: 0; pointer-events: none; }
+
+    .idle-logo {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .idle-icon-wrap {
+      width: 100px; height: 100px;
+      background: var(--surface-2);
+      border-radius: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+    }
+
+    .idle-wordmark {
+      font-size: 40px;
+      font-weight: 900;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--red);
+    }
+
+    .idle-subtitle {
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .loading-dots {
+      display: flex; gap: 8px; margin-top: 4px;
+    }
+    .loading-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+      opacity: 0.25;
+    }
+    .loading-dot:nth-child(1){animation:dotpulse 1.4s ease-in-out 0s infinite}
+    .loading-dot:nth-child(2){animation:dotpulse 1.4s ease-in-out 0.22s infinite}
+    .loading-dot:nth-child(3){animation:dotpulse 1.4s ease-in-out 0.44s infinite}
+    @keyframes dotpulse{0%,100%{opacity:0.15;transform:scale(0.8)}50%{opacity:1;transform:scale(1.3)}}
+
+    /* Text transitions */
+    .fade-out { opacity: 0 !important; transition: opacity 0.25s ease !important; }
+    .fade-in  { opacity: 1 !important; transition: opacity 0.35s ease !important; }
+  </style>
+</head>
+<body>
+
+  <!-- Ambient blurred art background -->
+  <div id="ambient-bg"></div>
+  <!-- Scanline texture overlay -->
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <!-- ── Idle / loading screen ── -->
+  <div id="idle-screen" role="status" aria-live="polite">
+    <div class="idle-logo">
+      <div class="idle-icon-wrap">
+        <!-- StaticFM glitchy radio tower logo (faithful recreation) -->
+        <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <!-- Antenna pole -->
+          <rect x="30.5" y="30" width="3" height="24" rx="1.5" fill="#e53535"/>
+          <!-- Top dot -->
+          <circle cx="32" cy="26" r="5" fill="#e53535"/>
+          <!-- Inner left arc -->
+          <path d="M26 22 Q16 32 26 42" stroke="#e53535" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <rect x="14" y="30" width="14" height="4" fill="#000"/>
+          <!-- Inner left glitch bar -->
+          <rect x="16" y="35" width="10" height="3" fill="#000"/>
+          <!-- Outer left arc -->
+          <path d="M20 15 Q4 32 20 49" stroke="#e53535" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <!-- Outer left glitch bars -->
+          <rect x="2" y="27" width="20" height="4" fill="#000"/>
+          <rect x="4" y="41" width="16" height="3.5" fill="#000"/>
+          <!-- Outer left arrow tip -->
+          <polyline points="20,15 15,10 21,14" stroke="#e53535" stroke-width="2.5" fill="none" stroke-linejoin="round"/>
+          <!-- Inner right arc -->
+          <path d="M38 22 Q48 32 38 42" stroke="#e53535" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <rect x="36" y="30" width="14" height="4" fill="#000"/>
+          <rect x="38" y="35" width="10" height="3" fill="#000"/>
+          <!-- Outer right arc -->
+          <path d="M44 15 Q60 32 44 49" stroke="#e53535" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <!-- Outer right glitch bars -->
+          <rect x="42" y="27" width="20" height="4" fill="#000"/>
+          <rect x="44" y="41" width="16" height="3.5" fill="#000"/>
+          <!-- Outer right arrow tip -->
+          <polyline points="44,15 49,10 43,14" stroke="#e53535" stroke-width="2.5" fill="none" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <span class="idle-wordmark">StaticFM</span>
+    </div>
+    <p class="idle-subtitle">Ready to cast</p>
+    <div class="loading-dots" aria-hidden="true">
+      <div class="loading-dot"></div>
+      <div class="loading-dot"></div>
+      <div class="loading-dot"></div>
+    </div>
+  </div>
+
+  <!-- ── Top header ── -->
+  <header class="header">
+    <div class="header-logo" aria-label="StaticFM">
+      <svg width="22" height="22" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="30.5" y="30" width="3" height="24" rx="1.5" fill="#e53535"/>
+        <circle cx="32" cy="26" r="5" fill="#e53535"/>
+        <path d="M26 22 Q16 32 26 42" stroke="#e53535" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <rect x="14" y="30" width="14" height="4" fill="#000"/>
+        <rect x="16" y="35" width="10" height="3" fill="#000"/>
+        <path d="M20 15 Q4 32 20 49" stroke="#e53535" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <rect x="2" y="27" width="20" height="4" fill="#000"/>
+        <rect x="4" y="41" width="16" height="3.5" fill="#000"/>
+        <polyline points="20,15 15,10 21,14" stroke="#e53535" stroke-width="2.5" fill="none" stroke-linejoin="round"/>
+        <path d="M38 22 Q48 32 38 42" stroke="#e53535" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <rect x="36" y="30" width="14" height="4" fill="#000"/>
+        <rect x="38" y="35" width="10" height="3" fill="#000"/>
+        <path d="M44 15 Q60 32 44 49" stroke="#e53535" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <rect x="42" y="27" width="20" height="4" fill="#000"/>
+        <rect x="44" y="41" width="16" height="3.5" fill="#000"/>
+        <polyline points="44,15 49,10 43,14" stroke="#e53535" stroke-width="2.5" fill="none" stroke-linejoin="round"/>
+      </svg>
+      <span class="header-wordmark">StaticFM</span>
+    </div>
+  </header>
+
+  <!-- ── Main player ── -->
+  <main id="app">
+    <div class="player-card">
+
+      <!-- Album Art / Logo Fallback -->
+      <div class="art-wrap">
+        <div class="art-container" id="art-container">
+          <!-- Default fallback: glitchy logo -->
+          <div class="art-fallback" id="art-fallback">
+            <svg width="200" height="200" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <rect x="30.5" y="30" width="3" height="24" rx="1.5" fill="#e53535"/>
+              <circle cx="32" cy="26" r="5" fill="#e53535"/>
+              <path d="M26 22 Q16 32 26 42" stroke="#e53535" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <rect x="14" y="30" width="14" height="4" fill="#141414"/>
+              <rect x="16" y="35" width="10" height="3" fill="#141414"/>
+              <path d="M20 15 Q4 32 20 49" stroke="#e53535" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <rect x="2" y="27" width="20" height="4" fill="#141414"/>
+              <rect x="4" y="41" width="16" height="3.5" fill="#141414"/>
+              <polyline points="20,15 15,10 21,14" stroke="#e53535" stroke-width="2.5" fill="none" stroke-linejoin="round"/>
+              <path d="M38 22 Q48 32 38 42" stroke="#e53535" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <rect x="36" y="30" width="14" height="4" fill="#141414"/>
+              <rect x="38" y="35" width="10" height="3" fill="#141414"/>
+              <path d="M44 15 Q60 32 44 49" stroke="#e53535" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <rect x="42" y="27" width="20" height="4" fill="#141414"/>
+              <rect x="44" y="41" width="16" height="3.5" fill="#141414"/>
+              <polyline points="44,15 49,10 43,14" stroke="#e53535" stroke-width="2.5" fill="none" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <!-- Album art (shown when available) -->
+          <img id="album-art" src="" alt="Station art" width="360" height="360" loading="lazy"/>
+        </div>
+        <div class="art-glow" id="art-glow"></div>
+      </div>
+
+      <!-- Track info -->
+      <div class="info">
+        <div class="live-badge" id="live-badge">
+          <div class="live-dot" aria-hidden="true"></div>
+          Live
+        </div>
+
+        <div id="station-name">StaticFM</div>
+
+        <div>
+          <p class="now-playing-label">Now Playing</p>
+          <h1 id="track-title">Loading&hellip;</h1>
+        </div>
+
+        <h2 id="artist-name"></h2>
+
+        <div class="divider" aria-hidden="true"></div>
+
+        <div class="eq-row">
+          <span class="eq-label">Audio</span>
+          <div class="eq-wrap" id="eq" aria-hidden="true">
+            <div class="eq-bar"></div>
+            <div class="eq-bar"></div>
+            <div class="eq-bar"></div>
+            <div class="eq-bar"></div>
+            <div class="eq-bar"></div>
+            <div class="eq-bar"></div>
+            <div class="eq-bar"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <script>
+    // ─────────────────────────────────────────────────────────────
+    // StaticFM Cast Custom Receiver
+    // Namespace matches the Android sender's sendMessage() call.
+    // ─────────────────────────────────────────────────────────────
+    const METADATA_NS = 'urn:x-cast:com.staticfm.metadata';
+
+    const context       = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
+
+    // DOM refs
+    const idleEl      = document.getElementById('idle-screen');
+    const ambientEl   = document.getElementById('ambient-bg');
+    const artContainer= document.getElementById('art-container');
+    const artFallback = document.getElementById('art-fallback');
+    const artImg      = document.getElementById('album-art');
+    const artGlow     = document.getElementById('art-glow');
+    const stationEl   = document.getElementById('station-name');
+    const titleEl     = document.getElementById('track-title');
+    const artistEl    = document.getElementById('artist-name');
+    const eqEl        = document.getElementById('eq');
+
+    // Player state → EQ animation + idle screen
+    playerManager.addEventListener(cast.framework.events.EventType.PLAYER_STATE, () => {
+      const state = playerManager.getPlayerState();
+      if (state === cast.framework.messages.PlayerState.PLAYING) {
+        eqEl.classList.remove('paused');
+        idleEl.classList.add('hidden');
+      } else if (state === cast.framework.messages.PlayerState.BUFFERING) {
+        idleEl.classList.add('hidden');
+      } else {
+        eqEl.classList.add('paused');
+      }
+    });
+
+    // On media load — pull initial metadata from MediaInformation
+    playerManager.addEventListener(cast.framework.events.EventType.LOADED_DATA, () => {
+      idleEl.classList.add('hidden');
+      const info = playerManager.getMediaInformation();
+      if (!info || !info.metadata) return;
+      const m = info.metadata;
+      applyMetadata({
+        title:   m.title   || 'Live Radio',
+        artist:  m.artist  || '',
+        station: m.subtitle || m.stationName || 'StaticFM',
+        artUrl:  (m.images && m.images[0]) ? m.images[0].url : ''
+      });
+    });
+
+    // Custom namespace listener — metadata from Android sender, NO stream reload
+    context.addCustomMessageListener(METADATA_NS, (event) => {
+      try {
+        const data = (typeof event.data === 'string') ? JSON.parse(event.data) : event.data;
+        applyMetadata(data);
+
+        // Push updated MediaInformation to all senders (true = broadcast)
+        // This does NOT restart or reload the stream
+        const mediaInfo = playerManager.getMediaInformation();
+        if (mediaInfo) {
+          const meta = new cast.framework.messages.MusicTrackMediaMetadata();
+          meta.title    = data.title   || mediaInfo.metadata?.title   || '';
+          meta.artist   = data.artist  || mediaInfo.metadata?.artist  || '';
+          meta.subtitle = data.station || mediaInfo.metadata?.subtitle || 'StaticFM';
+          if (data.artUrl) {
+            meta.images = [{ url: data.artUrl }];
+          } else if (mediaInfo.metadata?.images) {
+            meta.images = mediaInfo.metadata.images;
+          }
+          mediaInfo.metadata = meta;
+          playerManager.setMediaInformation(mediaInfo, true); // true = broadcast to senders
+        }
+      } catch (e) {
+        console.error('[StaticFM] Metadata error:', e);
+      }
+    });
+
+    // ── applyMetadata: update UI without touching the stream ──
+    function applyMetadata({ title, artist, station, artUrl }) {
+      // Smooth crossfade on text
+      [titleEl, artistEl].forEach(el => el.classList.add('fade-out'));
+
+      setTimeout(() => {
+        if (title)   titleEl.innerHTML  = escHtml(title);
+        if (artist)  artistEl.innerHTML = escHtml(artist);
+        if (station) stationEl.innerHTML = escHtml(station);
+
+        [titleEl, artistEl].forEach(el => {
+          el.classList.remove('fade-out');
+          el.classList.add('fade-in');
+          setTimeout(() => el.classList.remove('fade-in'), 400);
+        });
+      }, 270);
+
+      // Album art + ambient background
+      if (artUrl) {
+        const tempImg = new Image();
+        tempImg.onload = () => {
+          artImg.src = artUrl;
+          artImg.classList.add('visible');
+          artFallback.style.display = 'none';
+          artContainer.classList.add('has-art');
+          ambientEl.style.backgroundImage = `url('${artUrl}')`;
+          ambientEl.classList.add('visible');
+          artGlow.style.opacity = '0.55';
+        };
+        tempImg.onerror = () => { showFallbackArt(); };
+        tempImg.src = artUrl;
+      } else {
+        showFallbackArt();
+      }
+    }
+
+    function showFallbackArt() {
+      artImg.classList.remove('visible');
+      artFallback.style.display = 'flex';
+      artContainer.classList.remove('has-art');
+      artGlow.style.opacity = '0';
+    }
+
+    function escHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // ── Start receiver ──
+    const options = new cast.framework.CastReceiverOptions();
+    options.skipPlayersForTrackTypes = [cast.framework.messages.TrackType.TEXT];
+    context.start(options);
+  </script>
+
+</body>
+</html>
