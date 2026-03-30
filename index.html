@@ -573,8 +573,30 @@
 
     // ── Start receiver ──
     const options = new cast.framework.CastReceiverOptions();
-    options.skipPlayersForTrackTypes = [cast.framework.messages.TrackType.TEXT];
+    options.skipPlayersForTrackplayerManager.addEventListener(cast.framework.events.EventType.ERROR, (event) => {
+    console.error('[StaticFM] Player error:', JSON.stringify(event));
+});
+
+playerManager.addEventListener(cast.framework.events.EventType.REQUEST_LOAD, (event) => {
+    console.log('[StaticFM] Load request received:', JSON.stringify(event.requestData?.media?.contentId));
+});
+
+playerManager.addEventListener(cast.framework.events.EventType.LOAD_START, () => {
+    console.log('[StaticFM] Load started');
+}); Types = [cast.framework.messages.TrackType.TEXT];
     context.start(options);
+
+playerManager.addEventListener(cast.framework.events.EventType.ERROR, (event) => {
+    console.error('[StaticFM] Player error:', JSON.stringify(event));
+});
+
+playerManager.addEventListener(cast.framework.events.EventType.REQUEST_LOAD, (event) => {
+    console.log('[StaticFM] Load request received:', JSON.stringify(event.requestData?.media?.contentId));
+});
+
+playerManager.addEventListener(cast.framework.events.EventType.LOAD_START, () => {
+    console.log('[StaticFM] Load started');
+}); 
   </script>
 
 </body>
