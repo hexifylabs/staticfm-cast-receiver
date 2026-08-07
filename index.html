@@ -362,12 +362,30 @@
     /* Text transitions */
     .fade-out { opacity: 0 !important; transition: opacity 0.25s ease !important; }
     .fade-in  { opacity: 1 !important; transition: opacity 0.35s ease !important; }
+  
+    /* ── Invisible Cast Player Wrapper ── */
+    .invisible-player-wrapper {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0.01;
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    cast-media-player {
+      --theme-background-color: transparent;
+      --splash-image: none;
+      --playback-logo-image: none;
+      --progress-color: transparent;
+    }
+
   </style>
 </head>
 <body>
 
   <!-- Hidden default player required by Cast SDK for audio routing -->
-  <div style="display: none !important;">
+  <div class="invisible-player-wrapper">
     <cast-media-player></cast-media-player>
   </div>
 
